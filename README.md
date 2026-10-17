@@ -39,6 +39,7 @@ The output mask keeps its soft values. Nothing is rounded to 0/1.
 |---|---|---|
 | `mask_threshold` | 0.0 | Mask values above this count as the object when finding the crop box. Raise it to ignore faint noise |
 | `apply_mask` | on | Blend the image with `bg_color` using the mask. On: soft edges become smooth transparency. Off: the image is left as it is |
+| `transparent_background` | off | Output is RGBA. Alpha is the mask, and everything outside the mask is cleared, so other objects inside the crop box disappear. Overrides `bg_color` and `apply_mask` |
 
 ## What's new compared to the original KJNodes ImageCropByMaskBatch
 
@@ -60,7 +61,8 @@ The output mask keeps its soft values. Nothing is rounded to 0/1.
 
 - If the crop is pulled in by faint noise, raise `mask_threshold` to 0.05–0.2.
 - Use `preserve_size` when you want the original pixel scale. Leave it off to fill the whole canvas.
-- For a transparent-looking cut-out, turn `apply_mask` on and set `bg_color` to the color you want behind the object.
+- For a transparent cut-out, turn on `transparent_background`. Save with a node that keeps the alpha channel (the standard Save Image node keeps it when the image has 4 channels).
+- For a colored background, turn `transparent_background` off, keep `apply_mask` on, and set `bg_color`.
 - For a hard cut-out, feed the mask through the AHP Separate Masks node first, then use its 0/1 output here.
 
 ## Installation

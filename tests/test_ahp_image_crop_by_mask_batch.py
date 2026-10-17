@@ -155,38 +155,47 @@ def test_apply_mask_off_leaves_image_untouched():
     assert out_img[0, 32, 32].tolist() == [0.5, 0.5, 0.5]  # center of the 20x20 crop
 
 
-def test_transparent_background_keeps_image_colors():
+def test_transparent_background_outputs_rgba_with_mask_as_alpha():
+    img = torch.rand(1, 64, 64, 3)
+    m = circle_mask(64, 64, 32, 32, 15)
+    out_img, out_m = crop(img, m, width=64, height=64, preserve_size=True, transparent_background=True)
+    assert out_img.shape == (1, 64, 64, 4)
+    assert torch.allclose(out_img[0, ..., 3], out_m[0])
+    assert fractional_count(out_img[0, ..., 3]) > 0
+
+
+def test_transparent_background_clears_other_objects_in_crop_box():
+    img = torch.zeros(1, 64, 64, 3)
+    img[0, 10:30, 10:30, :] = torch.tensor([0.2, 0.4, 0.6])  # the masked object
+    img[0, 10:30, 40:55, :] = 0.9                             # a different object, not in the mask
+    m = torch.zeros(1, 64, 64)
+    m[0, 10:30, 10:30] = 1.0   # masked object
+    m[0, 50:55, 10:55] = 1.0   # a strip that stretches the crop box over the second object
+    out_img, _ = crop(img, m, width=64, height=64, preserve_size=False, transparent_background=True)
+    # The second object (x 40..55, y 10..30) is inside the crop box but not in the mask. It must be cleared.
+    other_region = out_img[0, 0:20, 30:45]
+    assert torch.all(other_region[..., 3] == 0)
+    assert torch.all(other_region[..., :3] == 0)
+
+
+def test_transparent_background_keeps_object_colors_and_alpha():
     img = torch.zeros(1, 64, 64, 3)
     img[0, 10:30, 10:30, :] = torch.tensor([0.2, 0.4, 0.6])
     m = torch.zeros(1, 64, 64)
     m[0, 10:30, 10:30] = 1.0
-    out_img, out_m = crop(img, m, width=64, height=64, preserve_size=True,
-                          bg="255, 0, 0", apply_mask=True, transparent_background=True)
-    # Object pixels keep their own color, with no background blended in.
-    center = out_img[0, 32, 32]
-    assert torch.allclose(center, torch.tensor([0.2, 0.4, 0.6]), atol=1e-5)
-    # Padding has no object, so its alpha is 0. The RGB there is not the background color.
-    assert out_m[0, 0, 0].item() == 0.0
-    assert out_img.shape[-1] == 3
+    out_img, _ = crop(img, m, width=64, height=64, preserve_size=True, transparent_background=True)
+    assert torch.allclose(out_img[0, 32, 32], torch.tensor([0.2, 0.4, 0.6, 1.0]), atol=1e-5)
+    assert out_img[0, 0, 0, 3].item() == 0.0
 
 
-def test_transparent_background_mask_is_alpha_with_soft_edge():
-    img = torch.rand(1, 64, 64, 3)
-    m = circle_mask(64, 64, 32, 32, 15)
-    _, out_m = crop(img, m, width=64, height=64, preserve_size=True, transparent_background=True)
-    assert fractional_count(out_m[0]) > 0
-
-
-def test_transparent_background_overrides_apply_mask():
+def test_transparent_background_overrides_apply_mask_and_bg_color():
     img = torch.full((1, 64, 64, 3), 0.5)
     m = torch.zeros(1, 64, 64)
     m[0, 10:30, 10:30] = 1.0
-    with_blend, _ = crop(img, m, width=64, height=64, preserve_size=True, bg="255, 0, 0",
-                         apply_mask=True, transparent_background=False)
-    transparent, _ = crop(img, m, width=64, height=64, preserve_size=True, bg="255, 0, 0",
-                          apply_mask=True, transparent_background=True)
-    assert with_blend[0, 0, 0].tolist() == [1.0, 0.0, 0.0]  # padding gets the background color
-    assert transparent[0, 32, 32].tolist() == [0.5, 0.5, 0.5]  # inside the object: own color, no blend
+    out_img, _ = crop(img, m, width=64, height=64, preserve_size=True, bg="255, 0, 0",
+                      apply_mask=True, transparent_background=True)
+    assert out_img[0, 0, 0].tolist() == [0.0, 0.0, 0.0, 0.0]  # no red background
+    assert out_img[0, 32, 32].tolist() == [0.5, 0.5, 0.5, 1.0]
 
 
 def test_soft_edge_blends_with_background():

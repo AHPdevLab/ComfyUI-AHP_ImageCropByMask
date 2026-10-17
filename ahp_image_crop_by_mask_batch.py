@@ -66,8 +66,8 @@ class AHP_ImageCropByMaskBatch:
     3. If needed, scale both to fit width x height (preserve_size controls this).
     4. Center them on a width x height canvas.
     5. Optionally blend the image with bg_color using the mask (apply_mask).
-       With transparent_background on, step 5 is skipped: the image keeps its own
-       colors, and the mask output is the alpha channel.
+       With transparent_background on, step 5 is replaced: the output is RGBA, alpha is the
+       mask, and every pixel outside the mask is cleared (RGB and alpha both 0).
 
     Output
     ------
@@ -118,7 +118,7 @@ class AHP_ImageCropByMaskBatch:
                 "apply_mask": ("BOOLEAN", {"default": True,
                                            "tooltip": "Blend the image with bg_color using the mask. Soft edges become smooth transparency."}),
                 "transparent_background": ("BOOLEAN", {"default": False,
-                                                       "tooltip": "No background color. The image keeps its own colors, and the output mask is the alpha channel. Use JoinImageWithAlpha to build an RGBA image."}),
+                                                       "tooltip": "Output is RGBA. Alpha is the mask, and everything outside the mask is cleared, so other objects in the crop box are removed. Ignores bg_color and apply_mask."}),
             },
         }
 
@@ -193,7 +193,13 @@ class AHP_ImageCropByMaskBatch:
             canvas_img[pad_y:pad_y + new_h, pad_x:pad_x + new_w, :] = img[:, :, :C]
             canvas_msk[pad_y:pad_y + new_h, pad_x:pad_x + new_w] = msk
 
-            if apply_mask and not transparent_background:
+            if transparent_background:
+                # Clear everything outside the mask, so other objects in the crop box are removed.
+                # Soft edge pixels keep their own color; alpha carries the soft edge.
+                inside = (canvas_msk > 0).float().unsqueeze(-1)
+                rgb = canvas_img[..., :3] * inside
+                canvas_img = torch.cat([rgb, canvas_msk.unsqueeze(-1)], dim=-1)
+            elif apply_mask:
                 a = canvas_msk.unsqueeze(-1)
                 rgb = canvas_img[..., :3]
                 canvas_img[..., :3] = rgb * a + color * (1.0 - a)
@@ -202,7 +208,8 @@ class AHP_ImageCropByMaskBatch:
             out_masks.append(canvas_msk)
 
         if not out_rgb:
-            return (torch.zeros((0, height, width, C), dtype=image.dtype, device=device),
+            out_c = 4 if transparent_background else C
+            return (torch.zeros((0, height, width, out_c), dtype=image.dtype, device=device),
                     torch.zeros((0, height, width), dtype=torch.float32, device=device))
 
         return (torch.stack(out_rgb, dim=0), torch.stack(out_masks, dim=0))
