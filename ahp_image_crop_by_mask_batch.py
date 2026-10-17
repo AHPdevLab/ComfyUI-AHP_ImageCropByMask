@@ -66,6 +66,8 @@ class AHP_ImageCropByMaskBatch:
     3. If needed, scale both to fit width x height (preserve_size controls this).
     4. Center them on a width x height canvas.
     5. Optionally blend the image with bg_color using the mask (apply_mask).
+       With transparent_background on, step 5 is skipped: the image keeps its own
+       colors, and the mask output is the alpha channel.
 
     Output
     ------
@@ -115,6 +117,8 @@ class AHP_ImageCropByMaskBatch:
                                              "tooltip": "Mask values above this count as the object when finding the crop box. Raise it to ignore faint noise."}),
                 "apply_mask": ("BOOLEAN", {"default": True,
                                            "tooltip": "Blend the image with bg_color using the mask. Soft edges become smooth transparency."}),
+                "transparent_background": ("BOOLEAN", {"default": False,
+                                                       "tooltip": "No background color. The image keeps its own colors, and the output mask is the alpha channel. Use JoinImageWithAlpha to build an RGBA image."}),
             },
         }
 
@@ -125,7 +129,7 @@ class AHP_ImageCropByMaskBatch:
     CATEGORY = "AHP/image"
 
     def crop(self, image, masks, width, height, bg_color, padding, preserve_size,
-             mask_threshold=0.0, apply_mask=True):
+             mask_threshold=0.0, apply_mask=True, transparent_background=False):
         B, H, W, C = image.shape
         width = max(1, int(width))
         height = max(1, int(height))
@@ -189,7 +193,7 @@ class AHP_ImageCropByMaskBatch:
             canvas_img[pad_y:pad_y + new_h, pad_x:pad_x + new_w, :] = img[:, :, :C]
             canvas_msk[pad_y:pad_y + new_h, pad_x:pad_x + new_w] = msk
 
-            if apply_mask:
+            if apply_mask and not transparent_background:
                 a = canvas_msk.unsqueeze(-1)
                 rgb = canvas_img[..., :3]
                 canvas_img[..., :3] = rgb * a + color * (1.0 - a)

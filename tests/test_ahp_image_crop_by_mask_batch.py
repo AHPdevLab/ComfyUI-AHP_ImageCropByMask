@@ -20,9 +20,10 @@ NODE = mod.AHP_ImageCropByMaskBatch()
 
 
 def crop(image, masks, width=256, height=256, bg="0, 0, 0", padding=0,
-         preserve_size=False, mask_threshold=0.0, apply_mask=True):
+         preserve_size=False, mask_threshold=0.0, apply_mask=True, transparent_background=False):
     return NODE.crop(image, masks, width, height, bg, padding, preserve_size,
-                     mask_threshold=mask_threshold, apply_mask=apply_mask)
+                     mask_threshold=mask_threshold, apply_mask=apply_mask,
+                     transparent_background=transparent_background)
 
 
 def circle_mask(H, W, cx, cy, r):
@@ -47,6 +48,7 @@ def test_registration():
     for name in ("image", "masks", "width", "height", "padding", "preserve_size", "bg_color"):
         assert name in inputs["required"]
     assert "mask_threshold" in inputs["optional"] and "apply_mask" in inputs["optional"]
+    assert inputs["optional"]["transparent_background"][1]["default"] is False
 
 
 # ---------------------------------------------------------------- soft edge preservation
@@ -151,6 +153,40 @@ def test_apply_mask_off_leaves_image_untouched():
     m[0, 10:30, 10:30] = 1.0
     out_img, _ = crop(img, m, width=64, height=64, preserve_size=True, bg="255, 0, 0", apply_mask=False)
     assert out_img[0, 32, 32].tolist() == [0.5, 0.5, 0.5]  # center of the 20x20 crop
+
+
+def test_transparent_background_keeps_image_colors():
+    img = torch.zeros(1, 64, 64, 3)
+    img[0, 10:30, 10:30, :] = torch.tensor([0.2, 0.4, 0.6])
+    m = torch.zeros(1, 64, 64)
+    m[0, 10:30, 10:30] = 1.0
+    out_img, out_m = crop(img, m, width=64, height=64, preserve_size=True,
+                          bg="255, 0, 0", apply_mask=True, transparent_background=True)
+    # Object pixels keep their own color, with no background blended in.
+    center = out_img[0, 32, 32]
+    assert torch.allclose(center, torch.tensor([0.2, 0.4, 0.6]), atol=1e-5)
+    # Padding has no object, so its alpha is 0. The RGB there is not the background color.
+    assert out_m[0, 0, 0].item() == 0.0
+    assert out_img.shape[-1] == 3
+
+
+def test_transparent_background_mask_is_alpha_with_soft_edge():
+    img = torch.rand(1, 64, 64, 3)
+    m = circle_mask(64, 64, 32, 32, 15)
+    _, out_m = crop(img, m, width=64, height=64, preserve_size=True, transparent_background=True)
+    assert fractional_count(out_m[0]) > 0
+
+
+def test_transparent_background_overrides_apply_mask():
+    img = torch.full((1, 64, 64, 3), 0.5)
+    m = torch.zeros(1, 64, 64)
+    m[0, 10:30, 10:30] = 1.0
+    with_blend, _ = crop(img, m, width=64, height=64, preserve_size=True, bg="255, 0, 0",
+                         apply_mask=True, transparent_background=False)
+    transparent, _ = crop(img, m, width=64, height=64, preserve_size=True, bg="255, 0, 0",
+                          apply_mask=True, transparent_background=True)
+    assert with_blend[0, 0, 0].tolist() == [1.0, 0.0, 0.0]  # padding gets the background color
+    assert transparent[0, 32, 32].tolist() == [0.5, 0.5, 0.5]  # inside the object: own color, no blend
 
 
 def test_soft_edge_blends_with_background():
